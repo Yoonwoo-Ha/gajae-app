@@ -11,7 +11,9 @@ import { sessionsService } from '@/modules/providers/services/sessions.service.j
 import { sessionSynchronizerService } from '@/modules/providers/services/session-synchronizer.service.js';
 import { getLiveGjcSessions, IDLE_GJC_ID_PREFIX } from '@/modules/providers/services/live-sessions.service.js';
 import {
+  answerExternalCodexApproval,
   getCurrentTmuxSessionName,
+  getExternalCodexApprovalPrompt,
   getExternalCliSessions,
   killExternalCodexSession,
   resolveCodexRolloutPath,
@@ -628,6 +630,28 @@ router.get(
   }),
 );
 
+async function assertExternalCodexSessionTarget(tmuxName: string, sessionId: string | null) {
+  const external = (await getExternalCliSessions()).find(
+    (session) => session.tmuxName === tmuxName && session.kind === 'codex',
+  );
+  if (!external) {
+    throw new AppError('Codex tmux session changed; reopen it from External CLI.', {
+      code: 'EXTERNAL_CODEX_SESSION_MISMATCH',
+      statusCode: 409,
+    });
+  }
+  const mapped = sessionId && external.codexThreadId
+    ? sessionsDb.getSessionByProviderSessionId('codex', external.codexThreadId)
+    : null;
+  if (sessionId && (!mapped || mapped.session_id !== sessionId)) {
+    throw new AppError('Codex tmux session changed; reopen it from External CLI.', {
+      code: 'EXTERNAL_CODEX_SESSION_MISMATCH',
+      statusCode: 409,
+    });
+  }
+  return external;
+}
+
 router.post(
   '/sessions/external/spawn',
   asyncHandler(async (req: Request, res: Response) => {
@@ -711,26 +735,63 @@ router.post(
       throw new AppError('message is required.', { code: 'EMPTY_MESSAGE', statusCode: 400 });
     }
 
-    const external = (await getExternalCliSessions()).find(
-      (session) => session.tmuxName === body.tmuxName && session.kind === 'codex',
-    );
-    if (!external) {
-      throw new AppError('Codex tmux session changed; reopen it from External CLI.', {
-        code: 'EXTERNAL_CODEX_SESSION_MISMATCH',
-        statusCode: 409,
-      });
-    }
-    const mapped = sessionId && external.codexThreadId
-      ? sessionsDb.getSessionByProviderSessionId('codex', external.codexThreadId)
-      : null;
-    if (sessionId && (!mapped || mapped.session_id !== sessionId)) {
-      throw new AppError('Codex tmux session changed; reopen it from External CLI.', {
-        code: 'EXTERNAL_CODEX_SESSION_MISMATCH',
-        statusCode: 409,
-      });
-    }
-
+    await assertExternalCodexSessionTarget(body.tmuxName, sessionId);
     await sendToExternalCodexSession(body.tmuxName, message);
+    res.json(createApiSuccessResponse({ ok: true }));
+  }),
+);
+
+router.get(
+  '/sessions/external/approval',
+  asyncHandler(async (req: Request, res: Response) => {
+    const tmuxName = typeof req.query.tmuxName === 'string' ? req.query.tmuxName : '';
+    const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : null;
+    if (!isValidTmuxName(tmuxName)) {
+      throw new AppError('A valid tmuxName is required.', { code: 'INVALID_TMUX_NAME', statusCode: 400 });
+    }
+    if (sessionId !== null && !SESSION_ID_PATTERN.test(sessionId)) {
+      throw new AppError('A valid sessionId is required.', { code: 'INVALID_SESSION_ID', statusCode: 400 });
+    }
+    await assertExternalCodexSessionTarget(tmuxName, sessionId);
+    const approval = await getExternalCodexApprovalPrompt(tmuxName);
+    res.json(createApiSuccessResponse({ approval }));
+  }),
+);
+
+router.post(
+  '/sessions/external/approval',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as {
+      tmuxName?: unknown;
+      sessionId?: unknown;
+      decision?: unknown;
+    };
+    if (!isValidTmuxName(body.tmuxName)) {
+      throw new AppError('A valid tmuxName is required.', { code: 'INVALID_TMUX_NAME', statusCode: 400 });
+    }
+    const sessionId = typeof body.sessionId === 'string' ? body.sessionId : null;
+    if (sessionId !== null && !SESSION_ID_PATTERN.test(sessionId)) {
+      throw new AppError('A valid sessionId is required.', { code: 'INVALID_SESSION_ID', statusCode: 400 });
+    }
+    if (
+      body.decision !== 'approve-once'
+      && body.decision !== 'approve-remember'
+      && body.decision !== 'reject'
+    ) {
+      throw new AppError('A valid approval decision is required.', {
+        code: 'INVALID_APPROVAL_DECISION',
+        statusCode: 400,
+      });
+    }
+    await assertExternalCodexSessionTarget(body.tmuxName, sessionId);
+    try {
+      await answerExternalCodexApproval(body.tmuxName, body.decision);
+    } catch {
+      throw new AppError('Codex approval prompt is no longer visible. Refresh and try again.', {
+        code: 'EXTERNAL_CODEX_APPROVAL_STALE',
+        statusCode: 409,
+      });
+    }
     res.json(createApiSuccessResponse({ ok: true }));
   }),
 );

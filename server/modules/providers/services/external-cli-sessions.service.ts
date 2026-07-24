@@ -33,11 +33,71 @@ export type ExternalCliSession = {
   codexThreadId?: string;
 };
 
+export type ExternalCodexApprovalPrompt = {
+  title: string;
+  text: string;
+  canRemember: boolean;
+};
+
+export type ExternalCodexApprovalDecision = 'approve-once' | 'approve-remember' | 'reject';
+
 type FreshCodexProcess = { tmuxName: string; cwd: string; startedAtMs: number };
 type FreshCodexThread = { id: string; cwd: string; createdAtMs: number };
 
 /** Matches the tower/live-send tmux-name discipline; also safe to embed in a shell command. */
 export const EXTERNAL_TMUX_NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
+
+const CODEX_APPROVAL_HEADER_RE = /(?:Would you like to (?:run|make|apply|continue|grant)|Allow Codex to|Approve (?:this )?(?:app )?tool call|Do you trust the contents|Enable full access)/i;
+const CODEX_APPROVAL_OPTION_RE = /^\s*[›>❯]?\s*\d+\.\s/;
+const CODEX_APPROVAL_YES_RE = /^\s*[›>❯]?\s*1\.\s*(?:Yes|Run|Apply|Allow|Proceed|Continue)\b/i;
+const CODEX_APPROVAL_NO_RE = /^\s*[›>❯]?\s*\d+\.\s*(?:No|Reject|Cancel|Deny)\b/i;
+
+/**
+ * Extracts a currently visible Codex approval modal from `tmux capture-pane`.
+ *
+ * Completed approvals remain in scrollback as "You approved …", so detection
+ * deliberately examines only the active pane screen and requires the modal
+ * header plus both affirmative and negative numbered options. This keeps the
+ * web buttons fail-closed when ordinary transcript text merely mentions an
+ * approval.
+ */
+export function parseExternalCodexApprovalScreen(screen: string): ExternalCodexApprovalPrompt | null {
+  const lines = screen
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd());
+  let headerIndex = -1;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (
+      CODEX_APPROVAL_HEADER_RE.test(lines[index])
+      && !CODEX_APPROVAL_OPTION_RE.test(lines[index])
+    ) {
+      headerIndex = index;
+    }
+  }
+  if (headerIndex < 0) return null;
+
+  const visibleTail = lines.slice(headerIndex);
+  while (visibleTail.length > 0 && !visibleTail.at(-1)?.trim()) {
+    visibleTail.pop();
+  }
+  if (
+    visibleTail.length === 0
+    || visibleTail.length > 40
+    || !visibleTail.some((line) => CODEX_APPROVAL_YES_RE.test(line))
+    || !visibleTail.some((line) => CODEX_APPROVAL_NO_RE.test(line))
+  ) {
+    return null;
+  }
+
+  const title = visibleTail[0].trim();
+  const text = visibleTail.join('\n').trim().slice(0, 12_000);
+  return {
+    title,
+    text,
+    canRemember: /don't ask again|always allow|this session|remember|commands that start with/i.test(text),
+  };
+}
 
 /** Extracts the native Codex thread id from `codex resume <uuid>` argv. */
 export function extractCodexResumeThreadId(processArgs: string | undefined): string | null {
@@ -376,6 +436,39 @@ export async function sendToExternalCodexSession(tmuxName: string, message: stri
   // leave the text sitting in the composer instead of submitting it.
   await new Promise((resolve) => setTimeout(resolve, 150));
   await runCommand('tmux', ['send-keys', '-t', target, 'Enter']);
+}
+
+/** Reads only the active screen; approval history in scrollback must not re-arm buttons. */
+export async function getExternalCodexApprovalPrompt(
+  tmuxName: string,
+): Promise<ExternalCodexApprovalPrompt | null> {
+  const screen = await runCommand('tmux', ['capture-pane', '-p', '-t', `${tmuxName}:`]);
+  return parseExternalCodexApprovalScreen(screen);
+}
+
+/**
+ * Answers the currently visible Codex approval modal through its native
+ * keyboard shortcuts. Re-capturing immediately before injection closes the
+ * stale-web-snapshot race: if the prompt has already gone away, no key is sent
+ * into the ordinary Codex composer.
+ */
+export async function answerExternalCodexApproval(
+  tmuxName: string,
+  decision: ExternalCodexApprovalDecision,
+): Promise<void> {
+  const prompt = await getExternalCodexApprovalPrompt(tmuxName);
+  if (!prompt) {
+    throw new Error('Codex approval prompt is no longer visible.');
+  }
+  if (decision === 'approve-remember' && !prompt.canRemember) {
+    throw new Error('This approval prompt has no remember option.');
+  }
+  const key = decision === 'approve-once'
+    ? 'y'
+    : decision === 'approve-remember'
+      ? 'p'
+      : 'Escape';
+  await runCommand('tmux', ['send-keys', '-t', `${tmuxName}:`, key]);
 }
 
 /** Resolves a web spawn cwd and rejects traversal/symlink escape outside HOME. */

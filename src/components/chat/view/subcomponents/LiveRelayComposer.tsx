@@ -4,6 +4,7 @@ import type { KeyboardEvent } from 'react';
 import { api } from '../../../../utils/api';
 
 import CommandMenu from './CommandMenu';
+import ExternalCodexApprovalPrompt from './ExternalCodexApprovalPrompt';
 
 type RelayStatus =
   | { kind: 'idle' }
@@ -251,6 +252,12 @@ export default function LiveRelayComposer({
   return (
     <div className="chat-composer-shell relative flex-shrink-0 px-2 pb-3 pt-2 sm:px-4">
       <div className="mx-auto max-w-[54.25rem] space-y-1.5">
+        {relayKind === 'codex' && (
+          <ExternalCodexApprovalPrompt
+            tmuxName={tmuxName}
+            sessionId={sessionId}
+          />
+        )}
         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-blue-600 dark:text-blue-400">
           <span className="inline-flex h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" aria-hidden />
           {model ? (

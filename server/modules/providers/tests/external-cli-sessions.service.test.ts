@@ -6,9 +6,81 @@ import {
   assignFreshCodexThreadIds,
   classifyExternalSessions,
   extractCodexResumeThreadId,
+  parseExternalCodexApprovalScreen,
   parseExternalPanes,
   parsePsTree,
 } from '@/modules/providers/services/external-cli-sessions.service.js';
+
+test('parseExternalCodexApprovalScreen detects an active Codex approval dialog', () => {
+  const screen = `
+previous transcript
+
+Would you like to run the following command?
+
+$ curl -I https://example.com
+
+› 1. Yes, proceed (y)
+  2. Yes, and don't ask again for commands that start with \`curl -I\` (p)
+  3. No, and tell Codex what to do differently (esc)
+`;
+  const approval = parseExternalCodexApprovalScreen(screen + '\n'.repeat(60));
+
+  assert.equal(approval?.title, 'Would you like to run the following command?');
+  assert.match(approval?.text ?? '', /curl -I https:\/\/example\.com/);
+  assert.equal(approval?.canRemember, true);
+});
+
+test('parseExternalCodexApprovalScreen ignores completed approvals in scrollback', () => {
+  const approval = parseExternalCodexApprovalScreen(`
+✔ You approved codex to run curl -I https://example.com this time
+
+• Ran curl -I https://example.com
+  └ HTTP/2 200
+`);
+
+  assert.equal(approval, null);
+});
+
+test('parseExternalCodexApprovalScreen requires both approve and reject choices', () => {
+  const approval = parseExternalCodexApprovalScreen(`
+The documentation asks: Would you like to run the following command?
+This is ordinary assistant text without an active dialog.
+`);
+
+  assert.equal(approval, null);
+});
+
+test('parseExternalCodexApprovalScreen supports dialogs without a remember choice', () => {
+  const approval = parseExternalCodexApprovalScreen(`
+Do you trust the contents of this directory?
+› 1. Yes, proceed (y)
+  2. No, cancel (esc)
+`);
+
+  assert.equal(approval?.canRemember, false);
+});
+
+test('parseExternalCodexApprovalScreen detects permission grant dialogs', () => {
+  const approval = parseExternalCodexApprovalScreen(`
+Would you like to grant these permissions?
+› 1. Yes, grant these permissions for this turn
+  2. No, continue without running it
+`);
+
+  assert.match(approval?.title ?? '', /grant these permissions/);
+});
+
+test('parseExternalCodexApprovalScreen does not mistake option descriptions for headers', () => {
+  const approval = parseExternalCodexApprovalScreen(`
+Enable full access?
+› 1. Yes, continue anyway      Apply full access for this session
+  2. Yes, and don't ask again  Enable full access and remember this choice
+  3. Cancel                    Go back without enabling full access
+`);
+
+  assert.equal(approval?.title, 'Enable full access?');
+  assert.equal(approval?.canRemember, true);
+});
 
 test('parseExternalPanes splits session_name<TAB>pane_pid<TAB>pane_current_command', () => {
   const out = parseExternalPanes('patina\t113501\tclaude\ntest\t360992\tnode\n\nbad-line\n');

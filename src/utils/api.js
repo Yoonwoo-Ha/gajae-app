@@ -113,6 +113,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ tmuxName, sessionId, message }),
     }),
+  externalCodexSessionApproval: (tmuxName, sessionId) => {
+    const params = new URLSearchParams({ tmuxName });
+    if (sessionId) params.set('sessionId', sessionId);
+    return authenticatedFetch(`/api/providers/sessions/external/approval?${params.toString()}`);
+  },
+  externalCodexSessionApprovalRespond: (tmuxName, sessionId, decision) =>
+    authenticatedFetch('/api/providers/sessions/external/approval', {
+      method: 'POST',
+      body: JSON.stringify({ tmuxName, sessionId, decision }),
+    }),
   // Create/stop native Codex tmux sessions directly from the External CLI tab.
   externalCodexSessionSpawn: (name, cwd) =>
     authenticatedFetch('/api/providers/sessions/external/spawn', {
