@@ -87,7 +87,7 @@ function AppContentInner() {
     activeSessions: processingSessions,
   });
 
-  // External CLI (claude/codex) tmux terminal shown in the main area. Lives
+  // External agent (claude/codex/omp/ssh) tmux terminal shown in the main area. Lives
   // here (not in useProjectsState) so the gjc session flow stays untouched;
   // selecting any project/session or starting a new chat clears it via the
   // wrapped sidebar handlers below.

@@ -222,7 +222,7 @@ function MainContent({
     );
   }
 
-  // External CLI (claude/codex) tmux terminal takes over the whole main area —
+  // External agent (claude/codex/omp/ssh) tmux terminal takes over the whole main area —
   // same footprint as a gjc session. Rendered before the no-project empty state
   // because the target carries its own project (PTY cwd only).
   if (externalTerminal) {

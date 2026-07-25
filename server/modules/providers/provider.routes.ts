@@ -596,7 +596,7 @@ router.get(
 router.get(
   '/sessions/external',
   asyncHandler(async (_req: Request, res: Response) => {
-    // External CLI (claude/codex) tmux sessions for the Termius-style terminal
+    // External agent (claude/codex/omp/ssh) tmux sessions for the terminal
     // lane. A tmux session is excluded only when a gjc process actually runs
     // INSIDE one of its panes (service-level subtree check). We deliberately do
     // NOT subtract tmux names the gjc live lane claimed via its cwd fallback:
@@ -635,7 +635,7 @@ async function assertExternalCodexSessionTarget(tmuxName: string, sessionId: str
     (session) => session.tmuxName === tmuxName && session.kind === 'codex',
   );
   if (!external) {
-    throw new AppError('Codex tmux session changed; reopen it from External CLI.', {
+    throw new AppError('Codex tmux session changed; reopen it from CDX.', {
       code: 'EXTERNAL_CODEX_SESSION_MISMATCH',
       statusCode: 409,
     });
@@ -644,7 +644,7 @@ async function assertExternalCodexSessionTarget(tmuxName: string, sessionId: str
     ? sessionsDb.getSessionByProviderSessionId('codex', external.codexThreadId)
     : null;
   if (sessionId && (!mapped || mapped.session_id !== sessionId)) {
-    throw new AppError('Codex tmux session changed; reopen it from External CLI.', {
+    throw new AppError('Codex tmux session changed; reopen it from CDX.', {
       code: 'EXTERNAL_CODEX_SESSION_MISMATCH',
       statusCode: 409,
     });

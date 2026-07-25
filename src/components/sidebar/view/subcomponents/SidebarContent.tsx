@@ -53,6 +53,8 @@ type ArchivedSessionGroup = {
   latestActivity: string | null;
 };
 
+type SidebarTopTab = 'gjc' | 'codex' | 'omp' | 'claude' | 'ssh' | 'archive';
+
 /**
  * Groups archived sessions by project metadata so the archive view preserves
  * the same mental model as the active sidebar: projects first, then sessions.
@@ -205,8 +207,58 @@ export default function SidebarContent({
   onExternalTerminalOpen,
   t,
 }: SidebarContentProps) {
-  const [topTab, setTopTab] = useState<'live' | 'external' | 'archive'>('live');
+  const [topTab, setTopTab] = useState<SidebarTopTab>('gjc');
   const { sessions: externalSessions, refresh: refreshExternalSessions } = useExternalCliSessions();
+  const externalTabs = [
+    {
+      id: 'codex' as const,
+      label: 'CDX',
+      emptyLabel: 'Codex',
+      dot: 'bg-emerald-500',
+      sessions: externalSessions.filter((session) => session.kind === 'codex'),
+    },
+    {
+      id: 'omp' as const,
+      label: 'OMP',
+      emptyLabel: 'Oh My Pi',
+      dot: 'bg-violet-500',
+      sessions: externalSessions.filter((session) => session.kind === 'omp'),
+    },
+    {
+      id: 'claude' as const,
+      label: 'CLC',
+      emptyLabel: 'Claude Code',
+      dot: 'bg-orange-500',
+      sessions: externalSessions.filter((session) => session.kind === 'claude'),
+    },
+    {
+      id: 'ssh' as const,
+      label: 'SSH',
+      emptyLabel: 'SSH',
+      dot: 'bg-slate-400',
+      sessions: externalSessions.filter((session) => session.kind === 'ssh'),
+    },
+  ];
+  const selectedExternalTab = externalTabs.find((tab) => tab.id === topTab);
+  const agentTabs: Array<{
+    id: Exclude<SidebarTopTab, 'archive'>;
+    label: string;
+    dot: string;
+    count: number;
+  }> = [
+    {
+      id: 'gjc',
+      label: 'GJC',
+      dot: 'bg-blue-500',
+      count: projectListProps.liveSessionIds.size,
+    },
+    ...externalTabs.map((tab) => ({
+      id: tab.id,
+      label: tab.label,
+      dot: tab.dot,
+      count: tab.sessions.length,
+    })),
+  ];
   const showConversationSearch = searchMode === 'conversations' && searchFilter.trim().length >= 2;
   const hasPartialResults = conversationResults && conversationResults.results.length > 0;
   const groupedArchivedSessions = groupArchivedSessionsByProject(archivedSessions);
@@ -237,50 +289,42 @@ export default function SidebarContent({
         t={t}
       />
 
-      <div className="flex items-center gap-2 px-2 pt-2 md:px-1.5">
-        {topTab === 'live' ? (
-          <span className="flex items-center gap-1.5 px-1 text-xs font-semibold text-foreground">
-            <span className="inline-flex h-1.5 w-1.5 rounded-full bg-blue-500" aria-hidden />
-            GJC{projectListProps.liveSessionIds.size > 0 ? ` (${projectListProps.liveSessionIds.size})` : ''}
-          </span>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setTopTab('live')}
-            className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-          >
-            GJC{projectListProps.liveSessionIds.size > 0 ? ` (${projectListProps.liveSessionIds.size})` : ''}
-          </button>
-        )}
-        {topTab === 'external' ? (
-          <span className="flex items-center gap-1.5 px-1 text-xs font-semibold text-foreground">
-            <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
-            외부 CLI{externalSessions.length > 0 ? ` (${externalSessions.length})` : ''}
-          </span>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setTopTab('external')}
-            className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
-          >
-            외부 CLI{externalSessions.length > 0 ? ` (${externalSessions.length})` : ''}
-          </button>
-        )}
+      <div className="flex items-center gap-0.5 overflow-x-auto px-2 pt-2 [scrollbar-width:none] md:px-1.5 [&::-webkit-scrollbar]:hidden">
+        {agentTabs.map((tab) => (
+          topTab === tab.id ? (
+            <span
+              key={tab.id}
+              className="flex shrink-0 items-center gap-1 px-1 py-1 text-xs font-semibold text-foreground"
+            >
+              <span className={`inline-flex h-1.5 w-1.5 rounded-full ${tab.dot}`} aria-hidden />
+              {tab.label}{tab.count > 0 ? ` (${tab.count})` : ''}
+            </span>
+          ) : (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setTopTab(tab.id)}
+              className="shrink-0 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+            >
+              {tab.label}{tab.count > 0 ? ` (${tab.count})` : ''}
+            </button>
+          )
+        ))}
         <span className="flex-1" />
         {topTab === 'archive' ? (
-          <span className="px-1 text-xs font-semibold text-foreground">기록</span>
+          <span className="shrink-0 px-1 py-1 text-xs font-semibold text-foreground">기록</span>
         ) : (
           <button
             type="button"
             onClick={() => setTopTab('archive')}
-            className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+            className="shrink-0 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
           >
             기록
           </button>
         )}
       </div>
 
-      {topTab === 'live' ? (
+      {topTab === 'gjc' ? (
         <ScrollArea className="flex-1 overflow-y-auto overscroll-contain md:px-1.5 md:py-2">
           <SidebarSpawnSession />
           {projectListProps.liveSessionIds.size === 0 ? (
@@ -303,14 +347,17 @@ export default function SidebarContent({
             />
           )}
         </ScrollArea>
-      ) : topTab === 'external' ? (
+      ) : selectedExternalTab ? (
         <ScrollArea className="flex-1 overflow-y-auto overscroll-contain md:px-1.5 md:py-2">
-          <SidebarCodexSpawnSession onCreated={refreshExternalSessions} />
+          {selectedExternalTab.id === 'codex' && (
+            <SidebarCodexSpawnSession onCreated={refreshExternalSessions} />
+          )}
           <SidebarExternalSection
-            sessions={externalSessions}
+            sessions={selectedExternalTab.sessions}
             projects={projects}
             onOpen={onExternalTerminalOpen}
             onChanged={refreshExternalSessions}
+            emptyLabel={selectedExternalTab.emptyLabel}
           />
         </ScrollArea>
       ) : (

@@ -6,7 +6,7 @@ import { basename, isAbsolute, join, relative, sep } from 'node:path';
 import Database from 'better-sqlite3';
 
 /**
- * External CLI (claude / codex) tmux-session detection — the Termius-style lane.
+ * External CLI (claude / codex / omp) tmux-session detection — the Termius-style lane.
  *
  * The gjc fleet has its own richer pipeline (live-sessions.service.ts: lsof +
  * transcript files). External CLIs get a deliberately simpler, screen-level view:
@@ -26,7 +26,7 @@ const TMUX_FIELD_SEP = '\t';
 const CODEX_THREAD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CODEX_RESUME_THREAD_RE = /(?:^|\s)resume\s+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?=\s|$)/i;
 
-export type ExternalCliKind = 'claude' | 'codex' | 'ssh';
+export type ExternalCliKind = 'claude' | 'codex' | 'omp' | 'ssh';
 export type ExternalCliSession = {
   tmuxName: string;
   kind: ExternalCliKind;
@@ -102,6 +102,21 @@ export function parseExternalCodexApprovalScreen(screen: string): ExternalCodexA
 /** Extracts the native Codex thread id from `codex resume <uuid>` argv. */
 export function extractCodexResumeThreadId(processArgs: string | undefined): string | null {
   return processArgs?.match(CODEX_RESUME_THREAD_RE)?.[1] ?? null;
+}
+
+/** Matches the OMP launcher without treating `man omp` or an editor argument as OMP. */
+export function isOmpProcessArgs(processArgs: string | undefined): boolean {
+  if (!processArgs) return false;
+  const tokens = processArgs.trim().split(/\s+/);
+  const first = basename(tokens[0] ?? '');
+  const second = tokens[1] ?? '';
+  if (first === 'omp') return true;
+  if (first !== 'bun' && first !== 'node' && first !== 'nodejs') return false;
+  return basename(second) === 'omp'
+    || (
+      second.includes('/@oh-my-pi/pi-coding-agent/')
+      && basename(second) === 'cli.js'
+    );
 }
 
 /**
@@ -270,6 +285,7 @@ export function classifyExternalSessions(args: {
   // Union comm sets per tmux session name.
   const commsBySession = new Map<string, Set<string>>();
   const codexThreadIdsBySession = new Map<string, Set<string>>();
+  const ompSessions = new Set<string>();
   for (const pane of args.panes) {
     let comms = commsBySession.get(pane.name);
     if (!comms) {
@@ -284,7 +300,11 @@ export function classifyExternalSessions(args: {
       if (comm) {
         comms.add(comm);
       }
-      const resumedThreadId = extractCodexResumeThreadId(argsByPid.get(pid));
+      const processArgs = argsByPid.get(pid);
+      if (isOmpProcessArgs(processArgs)) {
+        ompSessions.add(pane.name);
+      }
+      const resumedThreadId = extractCodexResumeThreadId(processArgs);
       if (resumedThreadId) {
         let threadIds = codexThreadIdsBySession.get(pane.name);
         if (!threadIds) {
@@ -321,6 +341,8 @@ export function classifyExternalSessions(args: {
         kind: 'codex',
         ...(threadIds.length === 1 ? { codexThreadId: threadIds[0] } : {}),
       });
+    } else if (ompSessions.has(name)) {
+      result.push({ tmuxName: name, kind: 'omp' });
     } else if (comms.has('ssh')) {
       // Remote lane: the pane tunnels into another machine, so the CLI running
       // there is invisible to local ps by definition (실측: company → ssh →

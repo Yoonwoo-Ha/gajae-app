@@ -7,6 +7,7 @@ import {
   classifyExternalSessions,
   extractCodexResumeThreadId,
   extractCodexThreadIdFromRolloutPath,
+  isOmpProcessArgs,
   parseExternalCodexApprovalScreen,
   parseExternalPanes,
   parsePsTree,
@@ -161,6 +162,18 @@ test('extractCodexResumeThreadId reads native `codex resume <uuid>` argv', () =>
   assert.equal(extractCodexResumeThreadId('codex --remote ws://127.0.0.1:4518'), null);
 });
 
+test('isOmpProcessArgs identifies native and Bun OMP launchers only', () => {
+  assert.equal(isOmpProcessArgs('/home/user/.bun/bin/omp'), true);
+  assert.equal(isOmpProcessArgs('bun /home/user/.bun/bin/omp'), true);
+  assert.equal(
+    isOmpProcessArgs('bun /home/user/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js'),
+    true,
+  );
+  assert.equal(isOmpProcessArgs('man omp'), false);
+  assert.equal(isOmpProcessArgs('vi /tmp/notes/omp'), false);
+  assert.equal(isOmpProcessArgs('bun /home/user/.bun/bin/gjc'), false);
+});
+
 test('extractCodexThreadIdFromRolloutPath accepts only Codex session JSONL files', () => {
   const root = '/home/user/.codex/sessions';
   assert.equal(
@@ -215,6 +228,19 @@ test('classifyExternalSessions: codex surfaces as node pane + codex descendant (
     ],
   });
   assert.deepEqual(result, [{ tmuxName: 'test', kind: 'codex' }]);
+});
+
+test('classifyExternalSessions: OMP surfaces from its Bun launcher argv', () => {
+  const result = classifyExternalSessions({
+    panes: [{ name: 'omp-work', pid: 455884, command: 'bun' }],
+    procs: [{
+      pid: 455884,
+      ppid: 1,
+      comm: 'bun',
+      args: '/home/user/.bun/bin/omp',
+    }],
+  });
+  assert.deepEqual(result, [{ tmuxName: 'omp-work', kind: 'omp' }]);
 });
 
 test('classifyExternalSessions: tagged Codex pane exposes its transcript thread id', () => {

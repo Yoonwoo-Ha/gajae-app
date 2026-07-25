@@ -8,12 +8,14 @@ import type { ExternalCliSession } from '../../hooks/useExternalCliSessions';
 const KIND_LABEL: Record<ExternalCliSession['kind'], string> = {
   claude: 'Claude Code',
   codex: 'Codex CLI',
+  omp: 'Oh My Pi',
   ssh: 'ssh (원격)',
 };
 
 const KIND_DOT: Record<ExternalCliSession['kind'], string> = {
   claude: 'bg-orange-500',
   codex: 'bg-emerald-500',
+  omp: 'bg-violet-500',
   ssh: 'bg-slate-400',
 };
 
@@ -23,15 +25,22 @@ type SidebarExternalSectionProps = {
   /** Opens the session as a full main-area terminal (like gjc sessions do). */
   onOpen: (target: ExternalTerminalTarget) => void;
   onChanged: () => void;
+  emptyLabel?: string;
 };
 
 /**
- * "외부 CLI" tab content: claude/codex tmux sessions (from
+ * Agent tab content: claude/codex/omp/ssh tmux sessions (from
  * useExternalCliSessions). A row click hands the target to the app shell,
  * which renders it as a full main-area terminal (Termius-style attach) —
  * mirroring how gjc sessions fill the right side.
  */
-export default function SidebarExternalSection({ sessions, projects, onOpen, onChanged }: SidebarExternalSectionProps) {
+export default function SidebarExternalSection({
+  sessions,
+  projects,
+  onOpen,
+  onChanged,
+  emptyLabel = 'agent',
+}: SidebarExternalSectionProps) {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [killing, setKilling] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -93,7 +102,7 @@ export default function SidebarExternalSection({ sessions, projects, onOpen, onC
   if (sessions.length === 0 || !shellProject) {
     return (
       <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-        지금 tmux에서 작동 중인 claude/codex/ssh 세션이 없습니다.
+        지금 tmux에서 작동 중인 {emptyLabel} 세션이 없습니다.
       </div>
     );
   }

@@ -4,14 +4,14 @@ import { api } from '../../../utils/api';
 
 export type ExternalCliSession = {
   tmuxName: string;
-  kind: 'claude' | 'codex' | 'ssh';
+  kind: 'claude' | 'codex' | 'omp' | 'ssh';
   transcriptSessionId?: string;
 };
 
 const POLL_INTERVAL_MS = 5000;
 
 /**
- * Polls /sessions/external (5s, best-effort) for claude/codex tmux sessions.
+ * Polls /sessions/external (5s, best-effort) for external agent tmux sessions.
  * Self-contained so the gjc live lane (useProjectsState's live poll) stays
  * untouched; gjc sessions are excluded server-side. [] on any failure.
  */
@@ -34,7 +34,15 @@ export function useExternalCliSessions(): { sessions: ExternalCliSession[]; refr
         const list: ExternalCliSession[] = body?.data?.externalSessions ?? body?.externalSessions ?? [];
         if (!cancelled && myGeneration > applied) {
           applied = myGeneration;
-          setSessions(list.filter((session) => session?.tmuxName && (session.kind === 'claude' || session.kind === 'codex' || session.kind === 'ssh')));
+          setSessions(list.filter((session) => (
+            session?.tmuxName
+            && (
+              session.kind === 'claude'
+              || session.kind === 'codex'
+              || session.kind === 'omp'
+              || session.kind === 'ssh'
+            )
+          )));
         }
       } catch {
         // best-effort — no tmux / endpoint error just empties the tab

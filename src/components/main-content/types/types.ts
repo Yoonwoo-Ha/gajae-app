@@ -62,7 +62,7 @@ export type MainContentProps = {
   onShowSettings: (tab?: SettingsMainTab) => void;
   externalMessageUpdate: number;
   newSessionTrigger: number;
-  // External CLI (claude/codex) tmux terminal shown as the full main area.
+  // External agent (claude/codex/omp/ssh) tmux terminal shown as the full main area.
   externalTerminal: ExternalTerminalTarget | null;
   onExternalTerminalClose: () => void;
 };
