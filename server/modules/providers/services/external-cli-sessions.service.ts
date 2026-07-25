@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
-import { realpath, stat } from 'node:fs/promises';
+import { readdir, readlink, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { isAbsolute, join, relative, sep } from 'node:path';
+import { basename, isAbsolute, join, relative, sep } from 'node:path';
 
 import Database from 'better-sqlite3';
 
@@ -102,6 +102,26 @@ export function parseExternalCodexApprovalScreen(screen: string): ExternalCodexA
 /** Extracts the native Codex thread id from `codex resume <uuid>` argv. */
 export function extractCodexResumeThreadId(processArgs: string | undefined): string | null {
   return processArgs?.match(CODEX_RESUME_THREAD_RE)?.[1] ?? null;
+}
+
+/**
+ * Reads a Codex thread id from an open rollout path, while rejecting files
+ * outside ~/.codex/sessions. This also handles `/resume` selected inside the
+ * TUI: the selected id is absent from argv, but Codex keeps its JSONL open.
+ */
+export function extractCodexThreadIdFromRolloutPath(
+  filePath: string,
+  sessionsRoot = join(homedir(), '.codex', 'sessions'),
+): string | null {
+  const normalizedPath = filePath.endsWith(' (deleted)')
+    ? filePath.slice(0, -' (deleted)'.length)
+    : filePath;
+  const rel = relative(sessionsRoot, normalizedPath);
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
+  const match = basename(normalizedPath).match(
+    /^rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i,
+  );
+  return match?.[1] ?? null;
 }
 
 /** Assigns each newly-created native thread to the closest preceding tmux Codex process. */
@@ -364,6 +384,70 @@ function descendants(rootPid: number, children: ReadonlyMap<number, number[]>): 
   return result;
 }
 
+async function readOpenCodexThreadIds(pid: number): Promise<Set<string>> {
+  const ids = new Set<string>();
+  const fdRoot = `/proc/${pid}/fd`;
+  const entries = await readdir(fdRoot).catch(() => []);
+  const targets = await Promise.all(entries.map(
+    (entry) => readlink(join(fdRoot, entry)).catch(() => null),
+  ));
+  for (const target of targets) {
+    if (!target) continue;
+    const threadId = extractCodexThreadIdFromRolloutPath(target);
+    if (threadId) ids.add(threadId);
+  }
+  return ids;
+}
+
+/**
+ * Resolves the active thread from the rollout JSONL held open by Codex.
+ * Unlike argv parsing, this continues to work after an in-TUI `/resume`.
+ */
+async function inferOpenCodexThreadIds(args: {
+  sessions: ExternalCliSession[];
+  panes: ReturnType<typeof parseExternalPanes>;
+  procs: ReturnType<typeof parsePsTree>;
+}): Promise<Map<string, string>> {
+  const codexSessionNames = new Set(
+    args.sessions
+      .filter((session) => session.kind === 'codex')
+      .map((session) => session.tmuxName),
+  );
+  if (codexSessionNames.size === 0) return new Map();
+
+  const children = new Map<number, number[]>();
+  const procByPid = new Map(args.procs.map((proc) => [proc.pid, proc]));
+  for (const proc of args.procs) {
+    const siblings = children.get(proc.ppid) ?? [];
+    siblings.push(proc.pid);
+    children.set(proc.ppid, siblings);
+  }
+
+  const idsBySession = new Map<string, Set<string>>();
+  for (const pane of args.panes) {
+    if (!codexSessionNames.has(pane.name)) continue;
+    const codexPids = descendants(pane.pid, children).filter((pid) => {
+      const proc = procByPid.get(pid);
+      return proc?.comm === 'codex'
+        && !proc.args?.includes(' app-server')
+        && !proc.args?.includes('code-mode');
+    });
+    for (const pid of codexPids) {
+      const openIds = await readOpenCodexThreadIds(pid);
+      if (openIds.size === 0) continue;
+      const sessionIds = idsBySession.get(pane.name) ?? new Set<string>();
+      for (const id of openIds) sessionIds.add(id);
+      idsBySession.set(pane.name, sessionIds);
+    }
+  }
+
+  const resolved = new Map<string, string>();
+  for (const [tmuxName, ids] of idsBySession) {
+    if (ids.size === 1) resolved.set(tmuxName, [...ids][0]);
+  }
+  return resolved;
+}
+
 function readFreshCodexThreads(minCreatedAtMs: number): FreshCodexThread[] {
   let db: Database.Database | null = null;
   try {
@@ -566,11 +650,18 @@ export async function getExternalCliSessions(): Promise<ExternalCliSession[]> {
   const panes = parseExternalPanes(tmuxOutput);
   const procs = parsePsTree(psOutput);
   const sessions = classifyExternalSessions({ panes, procs });
-  const inferred = await inferFreshCodexThreadIds({ sessions, panes, procs });
-  return sessions.map((session) => ({
+  const openIds = await inferOpenCodexThreadIds({ sessions, panes, procs });
+  const sessionsWithOpenIds = sessions.map((session) => ({
     ...session,
-    ...(!session.codexThreadId && inferred.has(session.tmuxName)
-      ? { codexThreadId: inferred.get(session.tmuxName)! }
+    ...(openIds.has(session.tmuxName)
+      ? { codexThreadId: openIds.get(session.tmuxName)! }
+      : {}),
+  }));
+  const freshIds = await inferFreshCodexThreadIds({ sessions: sessionsWithOpenIds, panes, procs });
+  return sessionsWithOpenIds.map((session) => ({
+    ...session,
+    ...(!session.codexThreadId && freshIds.has(session.tmuxName)
+      ? { codexThreadId: freshIds.get(session.tmuxName)! }
       : {}),
   }));
 }

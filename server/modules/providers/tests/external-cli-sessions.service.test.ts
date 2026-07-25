@@ -6,6 +6,7 @@ import {
   assignFreshCodexThreadIds,
   classifyExternalSessions,
   extractCodexResumeThreadId,
+  extractCodexThreadIdFromRolloutPath,
   parseExternalCodexApprovalScreen,
   parseExternalPanes,
   parsePsTree,
@@ -158,6 +159,25 @@ test('extractCodexResumeThreadId reads native `codex resume <uuid>` argv', () =>
     '019f7b07-3def-7501-a53f-f519c88dd722',
   );
   assert.equal(extractCodexResumeThreadId('codex --remote ws://127.0.0.1:4518'), null);
+});
+
+test('extractCodexThreadIdFromRolloutPath accepts only Codex session JSONL files', () => {
+  const root = '/home/user/.codex/sessions';
+  assert.equal(
+    extractCodexThreadIdFromRolloutPath(
+      `${root}/2026/07/20/rollout-2026-07-20T00-38-20-019f7b07-3def-7501-a53f-f519c88dd722.jsonl`,
+      root,
+    ),
+    '019f7b07-3def-7501-a53f-f519c88dd722',
+  );
+  assert.equal(
+    extractCodexThreadIdFromRolloutPath('/home/user/outside/rollout-019f7b07-3def-7501-a53f-f519c88dd722.jsonl', root),
+    null,
+  );
+  assert.equal(
+    extractCodexThreadIdFromRolloutPath(`${root}/2026/07/20/not-a-rollout.jsonl`, root),
+    null,
+  );
 });
 
 test('classifyExternalSessions auto-links a native Codex resume process to its transcript', () => {
